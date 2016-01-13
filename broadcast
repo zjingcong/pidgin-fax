@@ -1,0 +1,76 @@
+#!/usr/bin/python -E
+# -*- coding: UTF-8 -*-
+
+import argparse
+import subprocess
+import os
+import getpass
+
+
+authorized_user_list = ['cxinpeng', 'zjingcong']
+MESSAGE_TAG = '[BROADCAST_MESSAGE]'
+
+
+class Broadcast:
+    def is_authorized_user(self):
+        sender = getpass.getuser().strip()
+        if sender not in authorized_user_list:
+            print sender + ', you are not an authorized user.'
+            return False
+
+        return True
+
+    def is_available(self, recipient):
+        command = ['wei', '-s', recipient]
+        p = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        is_available_info, err = p.communicate()
+        if 'offline' in is_available_info:
+            print recipient, 'is offline.Your message will be sent by email.~(* >ω<) '
+
+    def list_formatter(self, l):
+        s = ' '.join(map(lambda i: i, l))
+
+        return s
+
+    def send_message(self, recipient_list, message_list):
+        for recipient in recipient_list:
+            self.is_available(recipient)
+
+        recipients = self.list_formatter(recipient_list)
+        message = MESSAGE_TAG + '"' + self.list_formatter(message_list) + '"'
+        print message
+        wei_to_recipient = 'wei %s -m %s' % (recipients, message)
+        os.system(wei_to_recipient)
+
+
+def get_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('-r', '--recipient', dest='recipient', nargs='*',
+                        help='Recipients of broadcast separated by space.Recipient can be a user or a mail group.')
+    parser.add_argument('-m', '--message', dest='message', nargs='*', help='Message to be sent.No exclamation please.')
+
+    args = parser.parse_args()
+
+    return args
+
+
+def main():
+    args = get_args()
+    broadcast = Broadcast()
+
+    if not broadcast.is_authorized_user():
+        return
+
+    if args.recipient:
+        if args.message:
+            broadcast.send_message(args.recipient, args.message)
+        else:
+            print 'No message or picture sent.'
+
+    else:
+        print 'No recipients.Please use -r, --recipient for recipients or -h, --help for more details.~(´ω`)~'
+
+
+if __name__ == '__main__':
+    main()

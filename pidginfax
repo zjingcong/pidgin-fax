@@ -1,0 +1,156 @@
+#!/usr/bin/python -E
+# -*- coding: UTF-8 -*-
+
+from optparse import OptionParser
+import os
+import gtk
+import subprocess
+import time
+import shutil
+
+TEM_DIC = '/tmp/tmp.png'
+
+
+class LdapHandler:
+    baseDn = 'cn=users,cn=accounts,dc=anim,dc=odw,dc=com,dc=cn'
+
+    def list(self):
+        ldapsearch = '''
+        ldapsearch -x -b %s | grep ^uid: | cut -d : -f 2
+        ''' % self.baseDn
+        return os.popen(ldapsearch)
+
+    def getAttribute(self, uid, field):
+        ldapsearch = '''
+        ldapsearch -x -b %s '(uid='%s')' %s | grep ^%s | cut -d : -f 2
+        ''' % (self.baseDn, uid, field, field)
+        value = os.popen(ldapsearch).readline()
+        return value.strip()
+
+
+class Fax:
+    def is_validuser(self, recipients):
+        recipient_list = recipients.split(',')
+        for recipient in recipient_list:
+            ldapH = LdapHandler()
+            if ldapH.getAttribute(recipient.strip(), "uid") == "":
+                print recipient + ' is not a valid odw user.'
+                return False
+
+        return True
+
+    def get_recipients_by_space(self, recipient_list):
+        recipients_by_space = ''
+        for recipient in recipient_list:
+            if recipients_by_space != '':
+                recipients_by_space += ' '
+            recipients_by_space += recipient.strip()
+
+        return recipients_by_space
+
+    def is_available(self, recipient):
+        command = ['wei', '-s', recipient]
+        p = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        is_available_info, err = p.communicate()
+        if 'offline' in is_available_info:
+            return False
+        else:
+            return True
+
+    def take_screenshot(self, area, filename):
+        if area:
+            command = 'import -verbose %s' % TEM_DIC
+            rawdata = os.popen(command)
+        else:
+            print 'Catching the window ~~~'
+            command = 'import -verbose -window root %s' % TEM_DIC
+            rawdata = os.popen(command)
+
+        matrix = rawdata.read().split(' ')
+        area = matrix[2].split('x')
+        coordinate = matrix[3].split('+')
+        w = gtk.gdk.get_default_root_window()
+        pb = gtk.gdk.Pixbuf(gtk.gdk.COLORSPACE_RGB, False, 8, int(area[0]), int(area[1]))
+        if len(coordinate) == 1:
+            pb = pb.get_from_drawable(w, w.get_colormap(), 0, 0, 0, 0, int(area[0]), int(area[1]))
+        else:
+            pb = pb.get_from_drawable(w, w.get_colormap(), int(coordinate[1]), int(coordinate[2]),
+                                      0, 0, int(area[0]), int(area[1]))
+
+        if (pb != None):
+            if filename != '':
+                pb.save(filename, "png")
+            else:
+                pb.save(TEM_DIC, 'png')
+        else:
+            print "Failed to get a screenshot."
+
+    def send_screenshot(self, area, recipients, openfile, filename):
+        recipient_list_tmp = recipients.split(',')
+        recipient_list = []
+
+        for recipient in recipient_list_tmp:
+            if not self.is_available(recipient):
+                print recipient, 'is offline now. Failed to send screenshot.'
+            else:
+                recipient_list.append(recipient)
+        del recipient_list_tmp
+
+        if len(recipient_list) == 0:
+            print 'No user available. Sad story.(;*´Д`)ﾉ'
+            return
+
+        recipients = self.get_recipients_by_space(recipient_list)
+
+        if openfile:
+            wei_to_recipients = 'wei %s -p %s' % (recipients, openfile)
+            os.system(wei_to_recipients)
+            if filename != '':
+                shutil.copy(openfile, filename)
+
+        else:
+            self.take_screenshot(area, filename)
+            wei_to_recipients = 'wei %s -p %s' % (recipients, TEM_DIC)
+            os.system(wei_to_recipients)
+            os.remove(TEM_DIC)
+
+
+def get_options():
+    usage = "usage: %prog [options] ..."
+    parser = OptionParser(usage=usage)
+
+    parser.add_option('-o', '--open', action='store', dest='openfile',
+                      default='', help='Open a file, from local disk or http.')
+    parser.add_option('-a', '--area', action='store_true', dest='area', default=True, help='take a screenshot.')
+    parser.add_option('-r', '--recipient', action='store', dest='recipient', help='Recipients separated by comma.')
+    parser.add_option('-w', '--window', action='store_false', dest='area', help='Grab the whole window.')
+    parser.add_option('--save', action='store', dest='filename', default='',
+                      help='The filename of the output image.Save to the local.Supported image type is "png".')
+    parser.add_option('--sleep', action='store', dest='sleeptime', default=0,
+                      help='Wait for several seconds before taking screenshot.')
+
+    (options, args) = parser.parse_args()
+
+    return options
+
+
+def main():
+    options = get_options()
+    fax = Fax()
+
+    if options.recipient:
+        if not fax.is_validuser(options.recipient):
+            return
+
+        if options.sleeptime == 0:
+            fax.send_screenshot(options.area, options.recipient, options.openfile, options.filename)
+        else:
+            print 'Please wait for %s seconds.' % str(options.sleeptime)
+            time.sleep(float(options.sleeptime))
+            fax.send_screenshot(options.area, options.recipient, options.openfile, options.filename)
+
+    else:
+        print 'No recipients.Please use -r, --recipient to enter recipients and -h, --help for more details.'
+
+if __name__ == '__main__':
+    main()
